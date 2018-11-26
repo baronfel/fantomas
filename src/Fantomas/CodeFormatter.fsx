@@ -1,8 +1,9 @@
 ﻿#r "../../packages/FSharp.Compiler.Service/lib/net45/FSharp.Compiler.Service.dll"
 
 #load "Utils.fs"
-#load "TokenMatcher.fs"
 #load "FormatConfig.fs"
+#load "TokenMatcher.fs"
+#load "Context.fs"
 #load "SourceParser.fs"
 #load "SourceTransformer.fs"
 #load "CodePrinter.fs"
@@ -26,9 +27,13 @@ fsi.AddPrinter (fun (p : pos) -> p.ToString())
 fsi.AddPrinter (fun (r : range) -> r.ToString())
 
 """
-type T() =
-    let x = 123
-//    override private x.ToString() = ""
+type QueryOption =
+    | FixedQuery of string // xpath
+    | KeywordSearch of string // keyword
+
+type MessageTypeQueryMeta =
+    { Options: QueryOption list }
+
 """
 |> formatSrc
 

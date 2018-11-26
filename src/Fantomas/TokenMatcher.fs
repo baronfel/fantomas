@@ -77,6 +77,10 @@ let (|WhiteSpaces|_|) = function
         Some (loop moreOrigTokens [t1])
     | _ -> None
 
+let (|LParen|_|) = function
+    | (Token origTok, origTokText) when origTok.TokenName = "LPAREN" -> Some origTokText
+    | _ -> None
+
 let (|RawDelimiter|_|) = function
     | (Token origTok, origTokText) when origTok.CharClass = FSharpTokenCharKind.Delimiter -> 
         Some origTokText
@@ -441,7 +445,9 @@ let (|OpenChunk|_|) = function
  
 /// Assume that originalText and newText are derived from the same AST. 
 /// Pick all comments and directives from originalText to insert into newText               
-let integrateComments isPreserveEOL compilationDefines (originalText : string) (newText : string) =
+let integrateComments (config:Fantomas.FormatConfig.FormatConfig) compilationDefines (originalText : string) (newText : string) =
+    let isPreserveEOL = config.PreserveEndOfLine
+
     let trim (txt : string) = 
         if not isPreserveEOL then txt
         else Regex.Replace(String.normalizeNewLine txt, @"[ \t]+$", "", RegexOptions.Multiline)
@@ -456,6 +462,8 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
     let buffer = System.Text.StringBuilder()
     let column = ref 0
     let indent = ref 0
+    
+    let printBuffer() = Debug.WriteLine(buffer.ToString())
 
     let addText (text : string) = 
         //Debug.WriteLine("ADDING '{0}'", text)
@@ -561,7 +569,8 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
         | (Marked(Token origTok, _, _) :: moreOrigTokens),  _ 
             when origTok.CharClass = FSharpTokenCharKind.WhiteSpace && origTok.ColorClass <> FSharpTokenColorKind.InactiveCode 
                 && origTok.ColorClass <> FSharpTokenColorKind.PreprocessorKeyword ->
-            Debug.WriteLine "dropping whitespace from orig tokens" 
+            printBuffer()
+            Debug.WriteLine "dropping whitespace from orig tokens"
             loop moreOrigTokens newTokens 
 
         | (NewLineToken _ :: moreOrigTokens), _ ->
@@ -665,8 +674,9 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
             | Space _ :: (EOL, newTokText) :: moreNewTokens | (EOL, newTokText) :: moreNewTokens ->
                 addText " "
                 for x in commentTokensText do addText x
-                Debug.WriteLine "emitting newline for end of sticky-to-left comment" 
-                addText newTokText 
+                if not isPreserveEOL then
+                    Debug.WriteLine "emitting newline for end of sticky-to-left comment" 
+                    addText newTokText
                 loop moreOrigTokens moreNewTokens 
             // Otherwise, skip a whitespace token and maintain the indentation
             | Space _ :: moreNewTokens | moreNewTokens -> 
@@ -681,7 +691,7 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
         
         // Emit end-of-line from new tokens
         | (Marked(inToken,_,_)::oldTokens),  (NewLine newTokText :: moreNewTokens) ->
-            Debug.WriteLine("emitting newline in new tokens '{0}'", newTokText)
+            Debug.WriteLine(sprintf "emitting newline in new tokens '%s'" newTokText)
             let nextOldTokens =
                 match (inToken) with 
                 | Tok(fsInToken,_) when (fsInToken.TokenName = "IN") ->
@@ -711,7 +721,9 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
                     moreNewTokens 
                 else
                     match moreNewTokens with
-                    | Space t::rs -> 
+                    | Space _::LParen _::rs when (not config.SpaceAroundDelimiter) ->
+                        List.skip 1 moreNewTokens
+                    | Space t::rs ->
                         addText " "
                         rs
                     | _ -> moreNewTokens
@@ -726,7 +738,7 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
 
         | (Delimiter tokText :: newTokens), (RawDelimiter newTokText :: moreNewTokens) 
             when tokText = newTokText && newTokText <> "[<" && newTokText <> ">]" && newTokText <> "|" ->
-            Debug.WriteLine("emitting matching delimiter '{0}' in new tokens", newTokText |> box)
+            Debug.WriteLine(sprintf "emitting matching delimiter '%s' in new tokens" newTokText)
             addText newTokText 
             loop newTokens moreNewTokens 
 
@@ -738,16 +750,13 @@ let integrateComments isPreserveEOL compilationDefines (originalText : string) (
             loop origTokens moreNewTokens 
 
         // Process the last line or block comments
-        | (LineCommentChunk false (commentTokensText, moreOrigTokens)), [] when (isPreserveEOL) ->
-            Debug.WriteLine("injecting the last line comment '{0}'", String.concat "" commentTokensText |> box)
-            for x in commentTokensText do addText x
-            loop moreOrigTokens newTokens
-
         | (LineCommentChunk false (commentTokensText, moreOrigTokens)), []
         | (BlockCommentChunk (commentTokensText, moreOrigTokens)), [] ->
             Debug.WriteLine("injecting the last line or block comment '{0}'", String.concat "" commentTokensText |> box)
-            // Until block comments can't have new line in the beginning, add two consecutive new lines
-            addText Environment.NewLine
+            if not isPreserveEOL then
+                // Until block comments can't have new line in the beginning, add two consecutive new lines
+                addText Environment.NewLine
+            
             for x in commentTokensText do addText x
             loop moreOrigTokens newTokens 
 

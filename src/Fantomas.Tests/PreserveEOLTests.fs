@@ -469,3 +469,86 @@ let x = 1
 let y = 2
 #endif
 """
+
+[<Test>]
+let ``single line comments at end of line should not added additional newline`` () =
+    let config = { config with PageWidth = 80 }
+
+    formatSourceString false """
+type QueryOption =
+    | FixedQuery of string // xpath
+    | KeywordSearch of string // keyword
+
+type MessageTypeQueryMeta =
+    { Options: QueryOption list }
+"""  config
+    |> should equal """
+type QueryOption =
+    | FixedQuery of string // xpath
+    | KeywordSearch of string // keyword
+
+type MessageTypeQueryMeta =
+    { Options : QueryOption list }
+"""
+
+[<Test>]
+let ``indentation should be preserved when delimiter is false`` () =
+    let config: Fantomas.FormatConfig.FormatConfig =
+        { PreserveEndOfLine = true
+          SpaceAfterComma = true
+          IndentSpaceNum = 4
+          PageWidth = 80
+          SpaceBeforeArgument = false
+          IndentOnTryWith = false
+          SpaceAroundDelimiter = false
+          SemicolonAtEndOfLine = false
+          SpaceBeforeColon = false
+          SpaceAfterSemicolon = false
+          ReorderOpenDeclaration = false
+          StrictMode = false }
+        
+    formatSourceString false """
+let config =
+    [ ("n", "1")
+      ("d", "2") ]
+"""  config
+    |> should equal """
+let config =
+    [("n", "1")
+     ("d", "2")]
+"""
+
+[<Test>]
+let ``ending with multiline comment should not introduce additional newline`` () =
+    formatSourceString false """
+#r "System.Xml.Linq"
+
+open System.Xml.Linq
+open System.Xml.XPath
+
+let xml = "<a>1</a>"
+
+(*
+Lorem ipsum dolor sit amet,
+consectetur adipiscing elit,
+sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Ut enim ad minim veniam
+*)
+
+"""  config
+    |> should equal """
+#r "System.Xml.Linq"
+
+open System.Xml.Linq
+open System.Xml.XPath
+
+let xml = "<a>1</a>"
+
+(*
+Lorem ipsum dolor sit amet,
+consectetur adipiscing elit,
+sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+Ut enim ad minim veniam
+*)
+
+"""

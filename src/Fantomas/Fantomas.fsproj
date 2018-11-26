@@ -2,15 +2,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>net452;netstandard2.0</TargetFrameworks>
-    <Version>2.9.1</Version>
+    <Version>2.9.2</Version>
   </PropertyGroup>
   <ItemGroup>
     <None Include="paket.references" />
     <Compile Include="AssemblyInfo.fs" />
     <Compile Include="Dbg.fs" />
     <Compile Include="Utils.fs" />
-    <Compile Include="TokenMatcher.fs" />
     <Compile Include="FormatConfig.fs" />
+    <Compile Include="TokenMatcher.fs" />
+    <Compile Include="Context.fs" />
     <Compile Include="SourceParser.fs" />
     <Compile Include="SourceTransformer.fs" />
     <Compile Include="CodePrinter.fs" />
