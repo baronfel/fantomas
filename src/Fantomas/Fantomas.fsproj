@@ -1,12 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\netfx.props" />
   <PropertyGroup>
     <TargetFrameworks>net452;netstandard2.0</TargetFrameworks>
-    <Version>2.9.2</Version>
+    <Version>2.9.1</Version>
+    <Description>Source code formatter for F#</Description>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="paket.references" />
     <Compile Include="AssemblyInfo.fs" />
+    <None Include="paket.references" />
     <Compile Include="Dbg.fs" />
     <Compile Include="Utils.fs" />
     <Compile Include="FormatConfig.fs" />

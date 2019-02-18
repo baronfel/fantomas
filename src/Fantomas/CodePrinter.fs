@@ -101,7 +101,8 @@ and genSigModuleOrNamespace astContext (SigModuleOrNamespace(ats, px, ao, s, mds
                 +> opt sepSpace ao genAccess -- s +> rep 2 sepNln)
     +> genSigModuleDeclList astContext mds
 
-and genModuleDeclList astContext = function
+and genModuleDeclList astContext e =
+    match e with
     | [x] -> genModuleDecl astContext x
 
     | OpenL(xs, ys) ->
@@ -265,8 +266,9 @@ and breakNlnOrAddSpace astContext brk e =
         (indent +> autoNlnOrSpace (genExpr astContext e) +> unindent)
 
 /// Preserve a break even if the expression is a one-liner
-and preserveBreakNln astContext e ctx = 
-    breakNln astContext (checkPreserveBreakForExpr e ctx) e ctx
+and preserveBreakNln astContext e ctx =
+    let brk = checkPreserveBreakForExpr e ctx || futureNlnCheck (genExpr astContext e) sepNone ctx
+    breakNln astContext brk e ctx
 
 and preserveBreakNlnOrAddSpace astContext e ctx =
     breakNlnOrAddSpace astContext (checkPreserveBreakForExpr e ctx) e ctx
@@ -502,16 +504,25 @@ and genExpr astContext synExpr =
     | StructTuple es -> !- "struct " +> sepOpenT +> genTuple astContext es +> sepCloseT
     | ArrayOrList(isArray, [], _) -> 
         ifElse isArray (sepOpenAFixed +> sepCloseAFixed) (sepOpenLFixed +> sepCloseLFixed)
-    | ArrayOrList(isArray, xs, isSimple) -> 
+    | ArrayOrList(isArray, xs, isSimple) ->
         let sep = ifElse isSimple sepSemi sepSemiNln
-        ifElse isArray (sepOpenA +> atCurrentColumn (colAutoNlnSkip0 sep xs (genExpr astContext)) +> sepCloseA) 
-            (sepOpenL +> atCurrentColumn (colAutoNlnSkip0 sep xs (genExpr astContext)) +> sepCloseL)
+        let sepWithPreserveEndOfLine ctx =
+            let length = List.length xs
+            let distinctLength = xs |> List.distinctBy (fun x -> x.Range.StartLine) |> List.length
+            let useNewline = ctx.Config.PreserveEndOfLine && (length = distinctLength)
+            
+            ctx
+            |> ifElse useNewline sepNln sep
+            
+        ifElse isArray (sepOpenA +> atCurrentColumn (colAutoNlnSkip0 sepWithPreserveEndOfLine xs (genExpr astContext)) +> sepCloseA) 
+            (sepOpenL +> atCurrentColumn (colAutoNlnSkip0 sepWithPreserveEndOfLine xs (genExpr astContext)) +> sepCloseL)
 
     | Record(inheritOpt, xs, eo) -> 
+        let recordExpr = opt (!- " with ") eo (genExpr astContext) +> atCurrentColumn (col sepSemiNln xs (genRecordFieldName astContext))
         sepOpenS 
-        +> opt (if xs.IsEmpty then sepNone else sepSemi) inheritOpt 
-            (fun (typ, expr) -> !- "inherit " +> genType astContext false typ +> genExpr astContext expr)
-        +> opt (!- " with ") eo (genExpr astContext) +> atCurrentColumn (col sepSemiNln xs (genRecordFieldName astContext))
+        +> atCurrentColumn (opt (if xs.IsEmpty then sepNone else ifElseCtx (futureNlnCheck recordExpr sepNone) sepNln sepSemi) inheritOpt
+            (fun (typ, expr) -> !- "inherit " +> genType astContext false typ +> genExpr astContext expr))
+        +> recordExpr
         +> sepCloseS
 
     | ObjExpr(t, eio, bd, ims, range) ->
@@ -574,7 +585,13 @@ and genExpr astContext synExpr =
         !- s +> sepSpace +> sepOpenS +> genExpr { astContext with IsNakedRange = true } e 
         +> ifElse (checkBreakForExpr e) (sepNln +> sepCloseSFixed) sepCloseS
     // This supposes to be an infix function, but for some reason it isn't picked up by InfixApps
-    | App(Var "?", e::es) -> genExpr astContext e -- "?" +> col sepSpace es (genExpr astContext)
+    | App(Var "?", e::es) ->
+        match es with
+        | SynExpr.Const(SynConst.String(_,_),_)::_ ->
+            genExpr astContext e -- "?" +> col sepSpace es (genExpr astContext)
+        | _ ->
+            genExpr astContext e -- "?" +> sepOpenT +> col sepSpace es (genExpr astContext) +> sepCloseT
+
     | App(Var "..", [e1; e2]) ->
         let expr = genExpr astContext e1 -- ".." +> genExpr astContext e2
         ifElse astContext.IsNakedRange expr (sepOpenS +> expr +> sepCloseS)
@@ -609,7 +626,7 @@ and genExpr astContext synExpr =
             | _ -> 
                 noNln (genExpr astContext e)
         expr
-        +> indent 
+        +> indent
         +> (col sepNone es (fun (s, e) -> 
                 let currentExprRange = e.Range
                 let writeExpr = (!- (sprintf ".%s" s) +> ifElse (hasParenthesis e) sepNone sepSpace +> genExpr astContext e)
@@ -644,11 +661,13 @@ and genExpr astContext synExpr =
 
     | TypeApp(e, ts) -> genExpr astContext e -- "<" +> col sepComma ts (genType astContext false) -- ">"
     | LetOrUses(bs, e) ->
-        let isInSameLine =
+        let isFromAst (ctx: Context) = ctx.Content = String.Empty
+        let isInSameLine ctx =
             match bs with
-            | [_, LetBinding(ats, px, ao, isInline, isMutable, p, _)] -> p.Range.EndLine = e.Range.StartLine
+            | [_, LetBinding(ats, px, ao, isInline, isMutable, p, _)] -> 
+                not (isFromAst ctx) && p.Range.EndLine = e.Range.StartLine && not(checkBreakForExpr e)
             | _ -> false
-        atCurrentColumn (genLetOrUseList astContext bs +> ifElse isInSameLine (!- " in ") sepNln +> genExpr astContext e)
+        atCurrentColumn (genLetOrUseList astContext bs +> ifElseCtx isInSameLine (!- " in ") sepNln +> genExpr astContext e)
 
     // Could customize a bit if e is single line
     | TryWith(e, cs) -> 
@@ -697,6 +716,10 @@ and genExpr astContext synExpr =
         let exprF = genExpr { astContext with IsInsideDotGet = true }
         addParenIfAutoNln e exprF -- (sprintf ".%s" s)
     | DotSet(e1, s, e2) -> addParenIfAutoNln e1 (genExpr astContext) -- sprintf ".%s <- " s +> genExpr astContext e2
+
+    | SynExpr.Set(e1,e2, _) ->
+        addParenIfAutoNln e1 (genExpr astContext) -- sprintf " <- " +> genExpr astContext e2
+        
     | LetOrUseBang(isUse, p, e1, e2) ->
         atCurrentColumn (ifElse isUse (!- "use! ") (!- "let! ") 
             +> genPat astContext p -- " = " +> genExpr astContext e1 +> sepNln +> genExpr astContext e2)
@@ -1083,7 +1106,7 @@ and genInterfaceImpl astContext (InterfaceImpl(t, bs, range)) =
         +> indent +> sepNln +> genMemberBindingList { astContext with InterfaceRange = Some range } bs +> unindent
 
 and genClause astContext hasBar (Clause(p, e, eo)) = 
-    ifElse hasBar sepBar sepNone +> genPat astContext p 
+    ifElse hasBar sepBar sepNone +> genPat astContext p
     +> optPre (!- " when ") sepNone eo (genExpr astContext) +> sepArrow +> preserveBreakNln astContext e
 
 /// Each multiline member definition has a pre and post new line. 
@@ -1205,10 +1228,11 @@ and genPatRecordFieldName astContext (PatRecordFieldName(s1, s2, p)) =
 and genPatWithIdent astContext (ido, p) = 
     opt (sepEq +> sepSpace) ido (!-) +> genPat astContext p
 
-and genPat astContext = function
+and genPat astContext pat =
+    match pat with
     | PatOptionalVal(s) -> !- (sprintf "?%s" s)
     | PatAttrib(p, ats) -> genOnelinerAttributes astContext ats +> genPat astContext p
-    | PatOr(p1, p2) -> genPat astContext p1 -- " | " +> genPat astContext p2
+    | PatOr(p1, p2) -> genPat astContext p1 +> sepNln -- "| " +> genPat astContext p2
     | PatAnds(ps) -> col (!- " & ") ps (genPat astContext)
     | PatNullary PatNull -> !- "null"
     | PatNullary PatWild -> sepWild

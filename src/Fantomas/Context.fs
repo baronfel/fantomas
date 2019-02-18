@@ -202,6 +202,9 @@ let internal optPre (f2 : _ -> Context) (f1 : Context -> _) o f (ctx : Context) 
 let internal ifElse b (f1 : Context -> Context) f2 (ctx : Context) =
     if b then f1 ctx else f2 ctx
 
+let internal ifElseCtx cond (f1 : Context -> Context) f2 (ctx : Context) =
+    if cond ctx then f1 ctx else f2 ctx
+
 /// Repeat application of a function n times
 let internal rep n (f : Context -> Context) (ctx : Context) =
     [1..n] |> List.fold (fun c _ -> f c) ctx
@@ -288,9 +291,9 @@ let internal futureNlnCheck f sep (ctx : Context) =
     let withoutStringConst = 
         str.Replace("\\\\", System.String.Empty).Replace("\\\"", System.String.Empty).Split([|'"'|])
         |> Seq.indexed |> Seq.filter (fun (i, _) -> i % 2 = 0) |> Seq.map snd |> String.concat System.String.Empty
-    let lines = withoutStringConst.Split([|Environment.NewLine|], StringSplitOptions.RemoveEmptyEntries) 
+    let lines = withoutStringConst.Split([|Environment.NewLine|], StringSplitOptions.None) 
 
-    (lines |> Seq.length) > 2
+    (lines |> Seq.length) >= 2
 
 /// Set a checkpoint to break at an appropriate column
 let internal autoNlnOrAddSep f sep (ctx : Context) =

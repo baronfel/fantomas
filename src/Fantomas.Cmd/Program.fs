@@ -15,6 +15,7 @@ open Fantomas.FormatConfig
 //  --recurse                       If any given file is a directory, recurse it and process all fs/fsx/fsi files
 //  --stdin                         Read F# source from standard input
 //  --stdout                        Write the formatted source code to standard output
+//  --version                       Print the version of tool.
 
 // Preferences:
 //  --indent=[1-10]                 Set number of spaces to use for indentation
@@ -58,12 +59,14 @@ let time f =
     printfn "Time taken: %O s" sw.Elapsed
     res
 
+[<RequireQualifiedAccess>]
 type InputPath = 
     | File of string 
     | Folder of string 
     | StdIn of string
     | Unspecified
 
+[<RequireQualifiedAccess>]
 type OutputPath =
     | IO of string
     | StdOut
@@ -75,13 +78,10 @@ let isFSharpFile (s: string) = Set.contains (Path.GetExtension s) extensions
 
 /// Get all appropriate files, either recursively or non-recursively
 let rec allFiles isRec path =
-    seq {
-        for f in Directory.GetFiles path do
-            if isFSharpFile f then yield f
-        if isRec then
-            for d in Directory.GetDirectories path do
-                yield! allFiles isRec d
-    }
+    let searchOption = (if isRec then SearchOption.AllDirectories else SearchOption.TopDirectoryOnly)
+    let obj = sprintf "%cobj%c" Path.DirectorySeparatorChar Path.DirectorySeparatorChar
+    Directory.GetFiles(path, "*.*", searchOption)
+    |> Seq.filter (fun f -> isFSharpFile f && not (f.Contains(obj)))
 
 /// Format a source string using given config and write to a text writer
 let processSourceString isFsiFile s (tw : TextWriter) config =
@@ -99,8 +99,8 @@ let main _args =
     let force = ref true
     let profile = ref false
 
-    let outputPath = ref Notknown
-    let inputPath = ref Unspecified
+    let outputPath = ref OutputPath.Notknown
+    let inputPath = ref InputPath.Unspecified
 
     let fsi = ref false
     let stdIn = ref false
@@ -123,19 +123,19 @@ let main _args =
 
     let handleOutput s =
         if not !stdOut then
-            outputPath := IO s
+            outputPath := OutputPath.IO s
 
     let handleStdOut() =
         stdOut := true
-        outputPath := StdOut
+        outputPath := OutputPath.StdOut
 
     let handleInput s = 
         if !stdIn then
-            inputPath := StdIn s
+            inputPath := InputPath.StdIn s
         elif Directory.Exists(s) then
-           inputPath := Folder s
+           inputPath := InputPath.Folder s
         elif File.Exists s && isFSharpFile s then
-           inputPath := File s
+           inputPath := InputPath.File s
         else
             eprintfn "Input path should be a file or a folder."
             exit 1
@@ -265,7 +265,7 @@ let main _args =
     | :? InvalidOperationException ->
         // Currently only support UTF8
         Console.InputEncoding <- Text.Encoding.UTF8
-        inputPath := StdIn(stdin.ReadToEnd())
+        inputPath := InputPath.StdIn(stdin.ReadToEnd())
 
     let processFile inputFile outputFile config =
         if inputFile <> outputFile then
@@ -289,22 +289,22 @@ let main _args =
             processFile i o config)
 
     match !inputPath, !outputPath with
-    | Unspecified, _ ->
+    | InputPath.Unspecified, _ ->
         eprintfn "Input path is missing..."
         exit 1
-    | Folder p1, Notknown -> processFolder p1 p1
-    | File p1, Notknown -> processFile p1 p1 config
-    | File p1, IO p2 ->
+    | InputPath.Folder p1, OutputPath.Notknown -> processFolder p1 p1
+    | InputPath.File p1, OutputPath.Notknown -> processFile p1 p1 config
+    | InputPath.File p1, OutputPath.IO p2 ->
         processFile p1 p2 config
-    | Folder p1, IO p2 -> processFolder p1 p2
-    | StdIn s, IO p ->
+    | InputPath.Folder p1, OutputPath.IO p2 -> processFolder p1 p2
+    | InputPath.StdIn s, OutputPath.IO p ->
         stringToFile s p config
-    | StdIn s, Notknown
-    | StdIn s, StdOut ->
+    | InputPath.StdIn s, OutputPath.Notknown
+    | InputPath.StdIn s, OutputPath.StdOut ->
         stringToStdOut s config
-    | File p, StdOut -> 
+    | InputPath.File p, OutputPath.StdOut -> 
         fileToStdOut p config
-    | Folder p, StdOut ->
+    | InputPath.Folder p, OutputPath.StdOut ->
         allFiles !recurse p
         |> Seq.iter (fun p -> fileToStdOut p config)
     0
